@@ -1,0 +1,603 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Particle Life</title>
+<style>
+/* 単一のダークな見た目（シミュレーション画面）。端末に応じて: マウス=左サイドパネル / タッチ=大きめの操作部 / 狭い画面=下からのシート */
+:root{
+  --bg:#000; --panel:rgba(18,18,22,.9); --line:#2e2e36;
+  --fg:#ddd; --fg-strong:#f0f0f4; --muted:#8a8a96; --dim:#777;
+  --btn:#2a2a32; --btn-hover:#3a3a44; --btn-border:#444;
+  --on:#3d3d7a; --on-border:#7a7aff; --accent:#8a8aff;
+  --sat:env(safe-area-inset-top,0px); --sab:env(safe-area-inset-bottom,0px);
+  --sal:env(safe-area-inset-left,0px); --sar:env(safe-area-inset-right,0px);
+  color-scheme:dark;
+}
+[hidden]{display:none!important}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);overflow:hidden;overscroll-behavior:none;font:12px system-ui,sans-serif}
+#c{position:fixed;inset:0;display:block;width:100%;height:100%;cursor:grab;touch-action:none}
+#tg{position:fixed;top:calc(8px + var(--sat));left:calc(8px + var(--sal));z-index:2;width:24px;height:24px;padding:0;border-radius:50%;font-size:12px;line-height:22px;opacity:.75}
+#p{position:fixed;z-index:1;top:calc(40px + var(--sat));left:calc(8px + var(--sal));width:190px;max-height:calc(100% - 68px - var(--sat) - var(--sab));overflow-y:auto;overscroll-behavior:contain;touch-action:pan-y;padding:8px 10px 10px;border-radius:8px;background:var(--panel);user-select:none;-webkit-user-select:none;scrollbar-width:thin}
+#p.h{display:none}
+#fps{color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums;margin-bottom:6px}
+details{border-top:1px solid var(--line);padding:6px 0 2px}
+summary{cursor:pointer;font-weight:600;color:var(--fg-strong);letter-spacing:.03em;list-style:none;padding:2px 0}
+summary::-webkit-details-marker{display:none}
+summary::before{content:'▸';display:inline-block;width:12px;color:var(--dim);transition:transform .15s}
+details[open]>summary::before{transform:rotate(90deg)}
+.r{margin:6px 0}.r div{display:flex;justify-content:space-between;align-items:center}
+.r div span:last-child{color:var(--muted);font-variant-numeric:tabular-nums}
+input[type=range]{width:100%;margin:2px 0;accent-color:var(--accent)}
+.g{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin:6px 0}
+.g>.full{grid-column:1/-1}
+button{background:var(--btn);color:var(--fg);border:1px solid var(--btn-border);border-radius:4px;padding:5px 4px;cursor:pointer;font:inherit;margin:0;touch-action:manipulation}
+button:hover{background:var(--btn-hover)}
+button:focus-visible,select:focus-visible,summary:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+button.on{background:var(--on);border-color:var(--on-border);color:var(--fg-strong)}
+#p .g button{width:100%}
+select{background:var(--btn);color:var(--fg);border:1px solid var(--btn-border);border-radius:4px;font:inherit;padding:2px}
+#mx{display:block;margin:6px auto 0;cursor:pointer;touch-action:none;-webkit-touch-callout:none}
+#mv{color:var(--muted);margin-top:3px;min-height:1.3em;font-variant-numeric:tabular-nums;font-size:11px}
+.note{color:var(--dim);font-size:11px;line-height:1.4}
+table{border-collapse:collapse;width:100%;color:var(--muted);font-size:11px;line-height:1.6}
+td:first-child{white-space:nowrap;padding-right:6px}
+kbd{background:var(--btn);border:1px solid var(--btn-border);border-radius:3px;padding:0 4px;font:inherit;color:var(--fg)}
+.touch{display:none}
+
+/* タッチ端末（スマホ・iPad）: 指で押しやすいサイズに */
+@media (pointer:coarse){
+  html,body{font-size:14px}
+  .touch{display:revert}.mouse{display:none}
+  #tg{width:36px;height:36px;font-size:16px;line-height:34px}
+  #p{top:calc(52px + var(--sat));width:230px;max-height:calc(100% - 80px - var(--sat) - var(--sab))}
+  button{padding:10px 6px;border-radius:6px}
+  select{padding:6px 4px}
+  .g{gap:6px;margin:8px 0}
+  input[type=range]{height:28px}
+  #fps,#mv,.note,table{font-size:12px}
+  summary{padding:6px 0}
+}
+
+/* 狭い画面（スマホ縦向きなど）: 画面下からのシート */
+@media (max-width:600px){
+  #p{top:auto;bottom:0;left:0;right:0;width:auto;max-height:46%;border-radius:14px 14px 0 0;
+     padding:10px max(16px,var(--sar)) max(12px,var(--sab)) max(16px,var(--sal))}
+}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<button id="tg" title="パネルを隠す (H)">●</button>
+<div id="p">
+  <div id="fps">&nbsp;</div>
+  <div class="g">
+    <button id="bP">一時停止</button><button id="bS">再配置</button>
+  </div>
+
+  <details open>
+    <summary>シミュレーション</summary>
+    <div id="sl-sim"></div>
+  </details>
+
+  <details open>
+    <summary>ルール（相互作用行列）</summary>
+    <div class="g"><button id="bR">新ルール</button><button id="bD">ゆらぎ開始</button></div>
+    <div id="sl-rule"></div>
+    <canvas id="mx"></canvas>
+    <div id="mv">&nbsp;</div>
+    <div class="note"><span class="mouse">左クリック +0.2 / 右クリック −0.2 / ホイール ±0.05</span><span class="touch">タップ +0.2 / 長押し −0.2</span></div>
+  </details>
+
+  <details open>
+    <summary>表示</summary>
+    <div class="r"><div><span>配色</span><select id="pl"></select></div></div>
+    <div id="sl-view"></div>
+    <div class="g">
+      <button id="bO">形: 四角</button><button id="bF">全画面</button>
+      <button id="bC" class="full">表示リセット（位置・ズーム）</button>
+    </div>
+  </details>
+
+  <details>
+    <summary>操作方法</summary>
+    <table class="touch">
+      <tr><td>1本指ドラッグ</td><td>表示移動</td></tr>
+      <tr><td>2本指ピンチ</td><td>ズーム</td></tr>
+      <tr><td>行列タップ</td><td>値 +0.2（値も表示）</td></tr>
+      <tr><td>行列長押し</td><td>値 −0.2</td></tr>
+      <tr><td>● / ○</td><td>パネル 表示 / 非表示</td></tr>
+    </table>
+    <table class="mouse">
+      <tr><td><kbd>Space</kbd></td><td>一時停止 / 再開</td></tr>
+      <tr><td><kbd>R</kbd></td><td>新ルール</td></tr>
+      <tr><td><kbd>D</kbd></td><td>ゆらぎ 開始 / 停止</td></tr>
+      <tr><td><kbd>G</kbd> <kbd>⇧G</kbd></td><td>配色 次 / 前</td></tr>
+      <tr><td><kbd>O</kbd></td><td>形 四角 / 円</td></tr>
+      <tr><td>ドラッグ <kbd>←↑↓→</kbd></td><td>表示移動</td></tr>
+      <tr><td>ホイール <kbd>+</kbd> <kbd>−</kbd></td><td>ズーム</td></tr>
+      <tr><td><kbd>C</kbd></td><td>表示リセット</td></tr>
+      <tr><td><kbd>F</kbd></td><td>全画面</td></tr>
+      <tr><td><kbd>H</kbd></td><td>パネル 表示 / 非表示</td></tr>
+    </table>
+  </details>
+</div>
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const cv = $('c');
+let gl = null, ctx = null;   // 描画は WebGL（GPU）優先。使えない環境では Canvas 2D にフォールバック
+const DPR = Math.min(devicePixelRatio || 1, 3);
+const coarse = matchMedia('(pointer:coarse)').matches;   // タッチ端末か
+const mx = $('mx'), mctx = mx.getContext('2d');
+// 行列の表示サイズ: マウス 190px / iPad 230px / スマホは画面幅に合わせて大きめ（タップしやすく）
+const MXS = coarse ? (innerWidth <= 600 ? Math.min(300, innerWidth - 32) : 230) : 190;
+mx.style.width = mx.style.height = MXS + 'px';
+const dpr = Math.min(devicePixelRatio || 1, 2);
+mx.width = mx.height = MXS * dpr;
+mctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+let hov = -1;   // マウスが乗っている行列セル
+
+// パラメータ
+const S = { n: 3000, m: 6, r: 80, t: 0.04, f: 10, d: 0.1, p: 2 };   // p: 粒子の大きさ（固定 2px）
+if (coarse) S.n = innerWidth <= 600 ? 1200 : 2000;   // スマホ・iPadは画面が小さく処理も軽めに
+// スマホは画面の画素密度が高く、2px だと粒が大きく見えるので 1px に
+if (coarse && Math.min(screen.width, screen.height) <= 600) S.p = 1;
+let drift = false, D = new Float32Array(0), driftFrame = 0;
+const BETA = 0.3, DT = 0.02, BG = 0xff0a0a0a;
+
+let W = 0, H = 0, img, buf, N = 0, M = 0, paused = false;
+let X, Y, VX, VY, C, X2, Y2, VX2, VY2, C2, cell;
+let cnt = new Int32Array(0), start = new Int32Array(1);
+let K, pal, css, palRGB = new Float32Array(36);
+
+// ---------- 初期化 ----------
+function resize() {
+  const ow = W, oh = H;
+  W = innerWidth; H = innerHeight;   // 世界の大きさ（物理計算）は CSS ピクセル
+  if (gl) {
+    cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);   // GPU描画は端末の実解像度でくっきり
+    gl.viewport(0, 0, cv.width, cv.height);
+  } else {
+    cv.width = W; cv.height = H;
+    img = ctx.createImageData(W, H);
+    buf = new Uint32Array(img.data.buffer);
+  }
+  if (ow && N) for (let i = 0; i < N; i++) { X[i] *= W / ow; Y[i] *= H / oh; }
+  if (ow) { camX *= W / ow; camY *= H / oh; }
+}
+
+function alloc(n) {
+  N = n;
+  X = new Float32Array(n); Y = new Float32Array(n); VX = new Float32Array(n); VY = new Float32Array(n);
+  X2 = new Float32Array(n); Y2 = new Float32Array(n); VX2 = new Float32Array(n); VY2 = new Float32Array(n);
+  C = new Uint8Array(n); C2 = new Uint8Array(n); cell = new Int32Array(n);
+}
+
+function spawn() {
+  if (N !== S.n) alloc(S.n);
+  for (let i = 0; i < N; i++) {
+    X[i] = Math.random() * W; Y[i] = Math.random() * H;
+    VX[i] = VY[i] = 0; C[i] = Math.random() * M | 0;
+  }
+}
+
+// 配色パターン: 12色ずつ。色数が12未満のときは全体から均等に抜き出す
+const PALETTES = [
+  ['虹', null],   // 色数に合わせて色相を等分
+  ['パステル', 'ffb3ba ffd8b1 fff5ba d4f7b0 baffc9 b5f0e8 bae1ff c9c6ff e0bbff ffc6f0 f5d0c5 e8e8e8'],
+  ['ネオン', 'ff0055 ff6a00 ffe600 aaff00 00ff6a 00ffd5 00b3ff 3d5cff 9d00ff ff00e1 ff4d94 ffffff'],
+  ['暖色', '7a1414 961a1a b31f1f d63a1f f05a1a f77f1f fca130 ffc04a ffd86b ffe895 fff3c0 fffbe6'],
+  ['寒色', '2b3f9a 2a4fb0 2a5cc0 1d55bf 2470d9 2b8ce6 39a6ee 4fc0f0 6fd6ee 95e6eb bff2ee e6fffb'],
+  ['森と大地', '4a3728 6b4f36 8c6a45 b08b5a c9a66b 7a8c3a 5c7a2e 3f6b2a 2e5c3a 4d8c6b 8fb39a d9d2b0'],
+  ['夕焼け', '4b1d7a 63208a 7a2390 8a1c7c b52a78 d9476b f06a57 f78f4a fbb045 fdd165 fde68f fff4c2'],
+  ['白黒', '464646 5d5d5d 737373 878787 9a9a9a ababab bcbcbc cbcbcb d9d9d9 e6e6e6 f2f2f2 ffffff'],
+];
+let palIdx = 0;
+function setColors(m) {
+  M = m; pal = new Uint32Array(M); css = [];
+  const list = PALETTES[palIdx][1]?.split(' ');
+  for (let i = 0; i < M; i++) {
+    let r, g, b;
+    if (!list) {
+      const h = i / M * 6, x = 1 - Math.abs(h % 2 - 1);
+      [r, g, b] = [[1,x,0],[x,1,0],[0,1,x],[0,x,1],[x,0,1],[1,0,x]][h | 0].map(v => v * 235 + 20 | 0);
+    } else {
+      const hex = list[M === 1 ? list.length - 1 : Math.round(i * (list.length - 1) / (M - 1))];
+      const v = parseInt(hex, 16); r = v >> 16; g = v >> 8 & 255; b = v & 255;
+    }
+    pal[i] = 0xff000000 | b << 16 | g << 8 | r;   // ABGR (little endian)
+    palRGB[i * 3] = r / 255; palRGB[i * 3 + 1] = g / 255; palRGB[i * 3 + 2] = b / 255;
+    css.push(`rgb(${r},${g},${b})`);
+  }
+  if (N) for (let i = 0; i < N; i++) if (C[i] >= M) C[i] = Math.random() * M | 0;
+}
+function setPalette(i) {
+  palIdx = (i + PALETTES.length) % PALETTES.length;
+  $('pl').value = palIdx;
+  setColors(M); drawMx();
+}
+
+function randRules() {
+  K = new Float32Array(M * M);
+  for (let i = 0; i < K.length; i++) K[i] = Math.random() * 2 - 1;
+  D = new Float32Array(M * M);
+  for (let i = 0; i < D.length; i++) D[i] = Math.random() * 2 - 1;
+  drawMx();
+}
+
+// 行列のゆらぎ: 各値が「向き(D)」を持ち、その向き自体もゆっくり変わる → なめらかに変化
+function driftStep() {
+  const a = S.d * DT;
+  for (let i = 0; i < K.length; i++) {
+    let d = D[i] + (Math.random() - 0.5) * 0.3;
+    d = d > 1 ? 1 : d < -1 ? -1 : d;
+    let k = K[i] + d * a;
+    if (k > 1) { k = 1; d = -Math.abs(d); } else if (k < -1) { k = -1; d = Math.abs(d); }
+    K[i] = k; D[i] = d;
+  }
+  if (++driftFrame % 10 === 0 && !$('p').classList.contains('h')) drawMx();
+}
+function toggleDrift() {
+  drift = !drift;
+  $('bD').textContent = drift ? 'ゆらぎ停止' : 'ゆらぎ開始';
+  $('bD').classList.toggle('on', drift);
+}
+
+// ---------- シミュレーション ----------
+const NB = new Int32Array(9);   // 近傍9セル（使い回し）
+function step() {
+  const rM = Math.min(S.r, W / 3, H / 3);
+  const gc = Math.floor(W / rM), gr = Math.floor(H / rM), cw = W / gc, ch = H / gr, nc = gc * gr;
+  if (cnt.length < nc) { cnt = new Int32Array(nc); start = new Int32Array(nc + 1); }
+
+  // 空間グリッド: カウンティングソートで粒子をセル順に並べ替え（キャッシュ効率UP）
+  cnt.fill(0, 0, nc);
+  for (let i = 0; i < N; i++) {
+    let cx = X[i] / cw | 0, cy = Y[i] / ch | 0;
+    if (cx >= gc) cx = gc - 1; if (cy >= gr) cy = gr - 1;
+    const k = cx + cy * gc; cell[i] = k; cnt[k]++;
+  }
+  start[0] = 0;
+  for (let k = 0; k < nc; k++) { start[k + 1] = start[k] + cnt[k]; cnt[k] = start[k]; }
+  for (let i = 0; i < N; i++) {
+    const d = cnt[cell[i]]++;
+    X2[d] = X[i]; Y2[d] = Y[i]; VX2[d] = VX[i]; VY2[d] = VY[i]; C2[d] = C[i];
+  }
+  let t;
+  t = X; X = X2; X2 = t; t = Y; Y = Y2; Y2 = t;
+  t = VX; VX = VX2; VX2 = t; t = VY; VY = VY2; VY2 = t;
+  t = C; C = C2; C2 = t;
+
+  // 力の計算
+  const fric = Math.pow(0.5, DT / S.t), fk = rM * S.f * DT, inv = 1 / rM;
+  const hw = W / 2, hh = H / 2, r2 = rM * rM, ib = 1 / BETA, i1b = 1 / (1 - BETA);
+  const nb = NB;
+  for (let cy = 0; cy < gr; cy++) for (let cx = 0; cx < gc; cx++) {
+    const k = cx + cy * gc, s0 = start[k], s1 = start[k + 1];
+    if (s0 === s1) continue;
+    let q = 0;
+    for (let oy = -1; oy <= 1; oy++) {
+      const ny = (cy + oy + gr) % gr;
+      for (let ox = -1; ox <= 1; ox++) nb[q++] = (cx + ox + gc) % gc + ny * gc;
+    }
+    for (let i = s0; i < s1; i++) {
+      const xi = X[i], yi = Y[i], row = C[i] * M;
+      let fx = 0, fy = 0;
+      for (let n = 0; n < 9; n++) {
+        const c = nb[n], e = start[c + 1];
+        for (let j = start[c]; j < e; j++) {
+          let dx = X[j] - xi, dy = Y[j] - yi;
+          if (dx > hw) dx -= W; else if (dx < -hw) dx += W;
+          if (dy > hh) dy -= H; else if (dy < -hh) dy += H;
+          const d2 = dx * dx + dy * dy;
+          if (d2 >= r2 || d2 === 0) continue;
+          const d = Math.sqrt(d2), r = d * inv;
+          const f = r < BETA ? r * ib - 1 : K[row + C[j]] * (1 - Math.abs(2 * r - 1 - BETA) * i1b);
+          const fd = f / d;
+          fx += dx * fd; fy += dy * fd;
+        }
+      }
+      VX[i] = VX[i] * fric + fx * fk;
+      VY[i] = VY[i] * fric + fy * fk;
+    }
+  }
+
+  // 位置更新（トーラス境界）
+  for (let i = 0; i < N; i++) {
+    let x = X[i] + VX[i] * DT, y = Y[i] + VY[i] * DT;
+    if (x < 0 || x >= W) x = (x % W + W) % W;
+    if (y < 0 || y >= H) y = (y % H + H) % H;
+    X[i] = x; Y[i] = y;
+  }
+}
+
+// ---------- 描画（ImageDataに直接書き込み） ----------
+// 表示位置（カメラ）: 世界の繰り返し範囲は固定のまま、見る位置だけずらす
+let camX = 0, camY = 0;
+function pan(dx, dy) {
+  camX = ((camX + dx) % W + W) % W;
+  camY = ((camY + dy) % H + H) % H;
+}
+
+// ズーム: 1 = 繰り返し範囲全体がちょうど画面に収まる。それ以上は拡大のみ
+let zoom = 1;
+const ZMIN = 1, ZMAX = 8;   // 最大ズームアウト = 繰り返し範囲ちょうど1枚分
+function zoomAt(f, sx, sy) {
+  const nz = Math.max(ZMIN, Math.min(ZMAX, zoom * f));
+  // カーソル位置の世界座標が動かないようにカメラを補正
+  pan(sx / zoom - sx / nz, sy / zoom - sy / nz);
+  zoom = nz;
+}
+
+// 粒子の形: 大きさごとに各行の塗り範囲 [L, R) を一度だけ計算してキャッシュ
+// 円は小数の直径もそのまま使い、四角は整数ピクセルに丸める
+let circle = false, spanD = 0, spanSz = 0, spanL, spanR;
+function makeSpans(dia) {
+  spanD = dia;
+  const sz = spanSz = Math.max(1, circle ? Math.ceil(dia - 0.01) : Math.round(dia));
+  spanL = new Int16Array(sz); spanR = new Int16Array(sz);
+  const c = sz / 2, r = circle ? dia / 2 : c;
+  for (let k = 0; k < sz; k++) {
+    const d = k + 0.5 - c, w = circle ? Math.sqrt(Math.max(0, r * r - d * d)) : r;
+    spanL[k] = Math.round(c - w); spanR[k] = Math.round(c + w);
+  }
+}
+function toggleShape() {
+  circle = !circle; spanD = 0;
+  $('bO').textContent = circle ? '形: 円' : '形: 四角';
+  $('bO').classList.toggle('on', circle);
+}
+
+function render2D() {
+  buf.fill(BG);
+  const z = zoom, dia = Math.min(80, S.p * z);
+  if (dia !== spanD) makeSpans(dia);
+  const sz = spanSz, hs = sz >> 1, L = spanL, R = spanR, tw = W * z, th = H * z;
+  for (let i = 0; i < N; i++) {
+    let dx = X[i] - camX, dy = Y[i] - camY;
+    if (dx < 0) dx += W; if (dy < 0) dy += H;
+    const p = pal[C[i]];
+    for (let sy = dy * z - hs; sy < H; sy += th) {
+      const top = Math.floor(sy), y0 = top < 0 ? 0 : top, ye = Math.min(top + sz, H);
+      for (let sx = dx * z - hs; sx < W; sx += tw) {
+        const left = Math.floor(sx);
+        for (let yy = y0; yy < ye; yy++) {
+          const k = yy - top, o = yy * W;
+          let x0 = left + L[k], xe = left + R[k];
+          if (x0 < 0) x0 = 0; if (xe > W) xe = W;
+          for (let xx = x0; xx < xe; xx++) buf[o + xx] = p;
+        }
+      }
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+// ---------- WebGL 描画: 粒子の座標と色番号だけを GPU に送り、点として描く ----------
+let glProg, glBuf, glData = new Float32Array(0), U = {};
+function initGL() {
+  gl = cv.getContext('webgl', { alpha: false, antialias: false, depth: false, stencil: false, powerPreference: 'high-performance' });
+  if (!gl) return false;
+  const sh = (type, src) => { const o = gl.createShader(type); gl.shaderSource(o, src); gl.compileShader(o); return o; };
+  glProg = gl.createProgram();
+  gl.attachShader(glProg, sh(gl.VERTEX_SHADER, `
+    attribute vec3 a; uniform vec2 cam, world; uniform float zoom, size; uniform vec3 pal[12]; varying vec3 col;
+    void main() {
+      vec2 s = mod(a.xy - cam, world) * zoom / world;
+      gl_Position = vec4(s.x * 2.0 - 1.0, 1.0 - s.y * 2.0, 0.0, 1.0);
+      gl_PointSize = size;
+      col = pal[int(a.z + 0.5)];
+    }`));
+  gl.attachShader(glProg, sh(gl.FRAGMENT_SHADER, `
+    precision mediump float; varying vec3 col; uniform float round;
+    void main() {
+      if (round > 0.5) { vec2 q = gl_PointCoord - 0.5; if (dot(q, q) > 0.25) discard; }
+      gl_FragColor = vec4(col, 1.0);
+    }`));
+  gl.linkProgram(glProg);
+  if (!gl.getProgramParameter(glProg, gl.LINK_STATUS)) { gl = null; return false; }
+  gl.useProgram(glProg);
+  for (const n of ['cam', 'world', 'zoom', 'size', 'pal', 'round']) U[n] = gl.getUniformLocation(glProg, n);
+  glBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, glBuf);
+  const loc = gl.getAttribLocation(glProg, 'a');
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 0, 0);
+  gl.clearColor((BG & 255) / 255, (BG >> 8 & 255) / 255, (BG >> 16 & 255) / 255, 1);
+  return true;
+}
+function renderGL() {
+  if (glData.length < N * 3) glData = new Float32Array(N * 3);
+  for (let i = 0, j = 0; i < N; i++, j += 3) { glData[j] = X[i]; glData[j + 1] = Y[i]; glData[j + 2] = C[i]; }
+  gl.bufferData(gl.ARRAY_BUFFER, glData.subarray(0, N * 3), gl.STREAM_DRAW);
+  gl.uniform2f(U.cam, camX, camY);
+  gl.uniform2f(U.world, W, H);
+  gl.uniform1f(U.zoom, zoom);
+  gl.uniform1f(U.size, Math.max(1, Math.min(80, S.p * zoom) * DPR));
+  gl.uniform1f(U.round, circle ? 1 : 0);
+  gl.uniform3fv(U.pal, palRGB);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.drawArrays(gl.POINTS, 0, N);
+}
+const render = () => gl ? renderGL() : render2D();
+if (!initGL()) ctx = cv.getContext('2d', { alpha: false });
+// GPU のコンテキストが失われたら復帰を待つ（復帰したら作り直す）
+cv.addEventListener('webglcontextlost', e => e.preventDefault());
+cv.addEventListener('webglcontextrestored', () => { initGL(); resize(); });
+
+// ---------- 相互作用行列UI ----------
+const fmt = (v, dg) => { const t = Math.abs(v).toFixed(dg).replace(/^0(?=\.)/, ''); return (v < -0.005 ? '-' : '') + t; };
+function drawMx() {
+  const s = MXS / (M + 1), dg = s >= 24 ? 2 : 1, fs = Math.max(7, s * (dg === 2 ? 0.34 : 0.4));
+  mctx.fillStyle = '#111'; mctx.fillRect(0, 0, MXS, MXS);
+  mctx.font = `${fs}px system-ui,sans-serif`; mctx.textAlign = 'center'; mctx.textBaseline = 'middle';
+  for (let i = 0; i < M; i++) {
+    mctx.fillStyle = css[i];
+    mctx.beginPath(); mctx.arc((i + 1.5) * s, s / 2, s * .3, 0, 7); mctx.fill();
+    mctx.beginPath(); mctx.arc(s / 2, (i + 1.5) * s, s * .3, 0, 7); mctx.fill();
+    for (let j = 0; j < M; j++) {
+      const v = K[i * M + j], a = Math.abs(v) * 220 | 0;
+      mctx.fillStyle = v > 0 ? `rgb(0,${a},30)` : `rgb(${a},0,30)`;
+      mctx.fillRect((j + 1) * s + 1, (i + 1) * s + 1, s - 2, s - 2);
+      mctx.fillStyle = 'rgba(255,255,255,.85)';
+      mctx.fillText(fmt(v, dg), (j + 1.5) * s, (i + 1.5) * s + .5);
+    }
+  }
+  $('mv').textContent = hov >= 0 && hov < M * M
+    ? `${Math.floor(hov / M) + 1}番 → ${hov % M + 1}番 : ${K[hov] >= 0 ? '+' : ''}${K[hov].toFixed(3)} (${K[hov] >= 0 ? '引き合う' : '反発'})` : '\u00a0';
+}
+function mxCell(e) {
+  const r = mx.getBoundingClientRect(), s = r.width / (M + 1);
+  const j = Math.floor((e.clientX - r.left) / s) - 1, i = Math.floor((e.clientY - r.top) / s) - 1;
+  return i < 0 || j < 0 || i >= M || j >= M ? -1 : i * M + j;
+}
+mx.addEventListener('mousemove', e => { const c = mxCell(e); if (c !== hov) { hov = c; drawMx(); } });
+mx.addEventListener('mouseleave', () => { hov = -1; drawMx(); });
+function mxEdit(e, dv) {
+  const k = mxCell(e);
+  if (k < 0) return;
+  K[k] = Math.max(-1, Math.min(1, Math.round((K[k] + dv) * 100) / 100));
+  drawMx();
+}
+// マウス: 左 +0.2 / 右 −0.2。タッチ: タップ +0.2 / 長押し −0.2（押した時点で値を表示）
+let lp = null;
+mx.addEventListener('pointerdown', e => {
+  if (e.pointerType === 'mouse') { mxEdit(e, e.button === 2 ? -0.2 : 0.2); return; }
+  e.preventDefault();
+  const c = mxCell(e);
+  if (c < 0) return;
+  hov = c; drawMx();
+  const at = { clientX: e.clientX, clientY: e.clientY }, o = { done: false };
+  o.t = setTimeout(() => { o.done = true; mxEdit(at, -0.2); navigator.vibrate?.(15); }, 450);
+  lp = o;
+});
+mx.addEventListener('pointerup', e => {
+  if (!lp) return;
+  clearTimeout(lp.t);
+  if (!lp.done && mxCell(e) === hov) mxEdit(e, 0.2);
+  lp = null;
+});
+mx.addEventListener('pointercancel', () => { if (lp) clearTimeout(lp.t); lp = null; });
+mx.addEventListener('contextmenu', e => e.preventDefault());
+mx.addEventListener('wheel', e => { e.preventDefault(); mxEdit(e, e.deltaY < 0 ? 0.05 : -0.05); }, { passive: false });
+
+// ---------- スライダー ----------
+const defs = [
+  ['n', '粒子数', 100, 10000, 100, 'sim'],
+  ['m', '色の数', 1, 12, 1, 'sim'],
+  ['r', '作用半径', 20, 200, 1, 'sim'],
+  ['t', '摩擦 (半減期)', 0.005, 0.3, 0.005, 'sim'],
+  ['f', '力の強さ', 0.1, 30, 0.1, 'sim'],
+  ['d', 'ゆらぎの変化量', 0, 1, 0.01, 'rule'],
+];
+for (const [k, label, min, max, st, grp] of defs) {
+  const d = document.createElement('div'); d.className = 'r';
+  d.innerHTML = `<div><span>${label}</span><span>${S[k]}</span></div><input type="range" min="${min}" max="${max}" step="${st}" value="${S[k]}">`;
+  const out = d.querySelector('div span:last-child'), inp = d.querySelector('input');
+  inp.addEventListener('input', () => {
+    S[k] = +inp.value; out.textContent = S[k];
+    if (k === 'n') spawn();
+    if (k === 'm') { setColors(S.m); randRules(); }
+  });
+  $('sl-' + grp).appendChild(d);
+}
+
+const togglePause = () => { paused = !paused; $('bP').textContent = paused ? '▶ 再開' : '一時停止'; $('bP').classList.toggle('on', paused); };
+const togglePanel = () => {
+  const h = $('p').classList.toggle('h');
+  if (!h) drawMx();
+  $('tg').textContent = h ? '○' : '●';
+  $('tg').title = h ? 'パネルを表示 (H)' : 'パネルを隠す (H)';
+};
+$('tg').onclick = togglePanel;
+$('bR').onclick = randRules;
+$('bS').onclick = spawn;
+$('bP').onclick = togglePause;
+PALETTES.forEach(([name], i) => $('pl').add(new Option(name, i)));
+$('pl').onchange = () => setPalette(+$('pl').value);
+$('bD').onclick = toggleDrift;
+addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  if (e.code === 'Space') { e.preventDefault(); togglePause(); }
+  else if (e.code === 'KeyR') randRules();
+  else if (e.code === 'KeyH') togglePanel();
+  else if (e.code === 'KeyG') setPalette(palIdx + (e.shiftKey ? -1 : 1));
+  else if (e.code === 'KeyD') toggleDrift();
+  else if (e.code === 'KeyC') resetView();
+  else if (e.code === 'KeyO') toggleShape();
+  else if (e.code === 'Equal' || e.code === 'NumpadAdd' || e.code === 'Semicolon') zoomAt(1.25, W / 2, H / 2);
+  else if (e.code === 'Minus' || e.code === 'NumpadSubtract') zoomAt(0.8, W / 2, H / 2);
+  else if (e.code === 'KeyF') toggleFull();
+  if (e.code.startsWith('Arrow')) { e.preventDefault(); keys.add(e.code); }
+});
+addEventListener('keyup', e => keys.delete(e.code));
+addEventListener('blur', () => keys.clear());
+addEventListener('resize', resize);
+// ボタンを押した後にフォーカスを外す（Space キーでボタンが二重に押されるのを防ぐ）
+document.addEventListener('click', e => { const t = e.target.closest('button,summary'); if (t) setTimeout(() => t.blur()); });
+
+// ドラッグ（マウス・1本指）で表示移動、2本指ピンチでズーム
+const keys = new Set();
+const ptrs = new Map();
+cv.addEventListener('pointerdown', e => {
+  cv.setPointerCapture(e.pointerId);
+  ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  cv.style.cursor = 'grabbing';
+});
+cv.addEventListener('pointermove', e => {
+  const p = ptrs.get(e.pointerId);
+  if (!p) return;
+  if (ptrs.size === 1) {
+    pan((p.x - e.clientX) / zoom, (p.y - e.clientY) / zoom);
+    p.x = e.clientX; p.y = e.clientY;
+    return;
+  }
+  const [a, b] = ptrs.values();
+  const ox = (a.x + b.x) / 2, oy = (a.y + b.y) / 2, od = Math.hypot(a.x - b.x, a.y - b.y);
+  p.x = e.clientX; p.y = e.clientY;
+  const nx = (a.x + b.x) / 2, ny = (a.y + b.y) / 2, nd = Math.hypot(a.x - b.x, a.y - b.y);
+  pan((ox - nx) / zoom, (oy - ny) / zoom);
+  if (od > 0) zoomAt(nd / od, nx, ny);
+});
+const endPtr = e => { ptrs.delete(e.pointerId); if (!ptrs.size) cv.style.cursor = 'grab'; };
+cv.addEventListener('pointerup', endPtr);
+cv.addEventListener('pointercancel', endPtr);
+const resetView = () => { camX = camY = 0; zoom = 1; };
+$('bC').onclick = resetView;
+$('bO').onclick = toggleShape;
+cv.addEventListener('wheel', e => { e.preventDefault(); zoomAt(Math.exp(-e.deltaY * 0.0015), e.clientX, e.clientY); }, { passive: false });
+
+// 全画面
+const toggleFull = () => {
+  if (document.fullscreenElement) document.exitFullscreen();
+  else document.documentElement.requestFullscreen().catch(() => {});
+};
+$('bF').onclick = toggleFull;
+if (!document.fullscreenEnabled) { $('bF').hidden = true; $('bO').classList.add('full'); }
+document.addEventListener('fullscreenchange', () => {
+  $('bF').textContent = document.fullscreenElement ? '全画面解除' : '全画面';
+  $('bF').classList.toggle('on', !!document.fullscreenElement);
+});
+
+// ---------- メインループ ----------
+let last = performance.now(), fpsS = 60, fpsT = 0;
+function loop(now) {
+  const dt = now - last; last = now;
+  fpsS += (1000 / Math.max(dt, 1) - fpsS) * 0.05;
+  if (now - fpsT > 500) { $('fps').textContent = `${fpsS.toFixed(0)} fps · ${N} 粒子 · ズーム ${Math.round(zoom * 100)}%${gl ? '' : ' · 2D'}`; fpsT = now; }
+  if (keys.size) {
+    const v = Math.min(dt, 50) * 0.5 / zoom;   // 画面上で500px/秒
+    pan((keys.has('ArrowRight') - keys.has('ArrowLeft')) * v, (keys.has('ArrowDown') - keys.has('ArrowUp')) * v);
+  }
+  if (!paused) { if (drift) driftStep(); step(); }
+  render();
+  requestAnimationFrame(loop);
+}
+
+resize(); setColors(S.m); spawn(); randRules();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
