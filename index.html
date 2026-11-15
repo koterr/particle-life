@@ -4,6 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Particle Life</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Particle Life">
+<meta name="theme-color" content="#000000">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
 <style>
 /* 単一のダークな見た目（シミュレーション画面）。端末に応じて: マウス=左サイドパネル / タッチ=大きめの操作部 / 狭い画面=下からのシート */
 :root{
@@ -45,6 +52,10 @@ table{border-collapse:collapse;width:100%;color:var(--muted);font-size:11px;line
 td:first-child{white-space:nowrap;padding-right:6px}
 kbd{background:var(--btn);border:1px solid var(--btn-border);border-radius:3px;padding:0 4px;font:inherit;color:var(--fg)}
 .touch{display:none}
+#a2hs{position:fixed;z-index:3;left:50%;top:50%;transform:translate(-50%,-50%);width:min(320px,calc(100% - 32px));box-sizing:border-box;padding:16px;border-radius:12px;background:var(--panel);border:1px solid var(--btn-border);line-height:1.6}
+#a2hs b{color:var(--fg-strong)}
+#a2hs ol{margin:8px 0 12px;padding-left:1.4em}
+#a2hs button{width:100%}
 
 /* タッチ端末（スマホ・iPad）: 指で押しやすいサイズに */
 @media (pointer:coarse){
@@ -69,6 +80,15 @@ kbd{background:var(--btn);border:1px solid var(--btn-border);border-radius:3px;p
 </head>
 <body>
 <canvas id="c"></canvas>
+<div id="a2hs" hidden>
+  <b>iPhoneで全画面にするには</b>
+  <ol>
+    <li>Safari の共有ボタン（□↑）をタップ</li>
+    <li>「ホーム画面に追加」を選ぶ</li>
+    <li>ホーム画面のアイコンから開く</li>
+  </ol>
+  <button id="a2hsClose">閉じる</button>
+</div>
 <button id="tg" title="パネルを隠す (H)">●</button>
 <div id="p">
   <div id="fps">&nbsp;</div>
@@ -570,16 +590,26 @@ $('bO').onclick = toggleShape;
 cv.addEventListener('wheel', e => { e.preventDefault(); zoomAt(Math.exp(-e.deltaY * 0.0015), e.clientX, e.clientY); }, { passive: false });
 
 // 全画面
+const fsEl = () => document.fullscreenElement || document.webkitFullscreenElement;
+const canFS = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);   // iPad Safari は webkit 版
+const standalone = navigator.standalone === true || matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches;
 const toggleFull = () => {
-  if (document.fullscreenElement) document.exitFullscreen();
-  else document.documentElement.requestFullscreen().catch(() => {});
+  if (fsEl()) (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+  else if (canFS) {
+    const el = document.documentElement, r = (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
+    if (r && r.catch) r.catch(() => {});
+  } else $('a2hs').hidden = false;   // iPhone など: ホーム画面に追加する方法を案内
 };
 $('bF').onclick = toggleFull;
-if (!document.fullscreenEnabled) { $('bF').hidden = true; $('bO').classList.add('full'); }
-document.addEventListener('fullscreenchange', () => {
-  $('bF').textContent = document.fullscreenElement ? '全画面解除' : '全画面';
-  $('bF').classList.toggle('on', !!document.fullscreenElement);
-});
+$('a2hsClose').onclick = () => { $('a2hs').hidden = true; };
+// ホーム画面から開いている（すでに全画面）ならボタン不要
+if (standalone) { $('bF').hidden = true; $('bO').classList.add('full'); }
+const onFS = () => {
+  $('bF').textContent = fsEl() ? '全画面解除' : '全画面';
+  $('bF').classList.toggle('on', !!fsEl());
+};
+document.addEventListener('fullscreenchange', onFS);
+document.addEventListener('webkitfullscreenchange', onFS);
 
 // ---------- メインループ ----------
 let last = performance.now(), fpsS = 60, fpsT = 0;
