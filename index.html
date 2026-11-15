@@ -17,6 +17,7 @@
   --bg:#000; --panel:rgba(18,18,22,.9); --line:#2e2e36;
   --fg:#ddd; --fg-strong:#f0f0f4; --muted:#8a8a96; --dim:#777;
   --btn:#2a2a32; --btn-hover:#3a3a44; --btn-border:#444;
+  --panel-solid:#121216;
   --pos:#5dff8a; --neg:#ff6b6b;
   --on:#3d3d7a; --on-border:#7a7aff; --accent:#8a8aff;
   --sat:env(safe-area-inset-top,0px); --sab:env(safe-area-inset-bottom,0px);
@@ -74,9 +75,15 @@ kbd{background:var(--btn);border:1px solid var(--btn-border);border-radius:3px;p
 }
 
 /* 狭い画面（スマホ縦向きなど）: 画面下からのシート */
+#grab{display:none}
 @media (max-width:600px){
-  #p{top:auto;bottom:0;left:0;right:0;width:auto;max-height:46%;border-radius:14px 14px 0 0;
-     padding:10px max(16px,var(--sar)) max(12px,var(--sab)) max(16px,var(--sal))}
+  #p{top:auto;bottom:0;left:0;right:0;width:auto;box-sizing:border-box;
+     height:var(--sheet-h,46%);max-height:calc(100% - 56px - var(--sat));border-radius:14px 14px 0 0;
+     padding:0 max(16px,var(--sar)) max(12px,var(--sab)) max(16px,var(--sal))}
+  /* 上端の取っ手: 上下にドラッグして高さを変える（スクロールしても上に貼りつく） */
+  #grab{display:block;position:sticky;top:0;z-index:1;margin:0 calc(-1 * max(16px,var(--sar))) 4px calc(-1 * max(16px,var(--sal)));
+        padding:10px 0 12px;background:var(--panel-solid);touch-action:none;cursor:ns-resize}
+  #grab::before{content:'';display:block;width:40px;height:5px;margin:0 auto;border-radius:3px;background:var(--btn-border)}
 }
 </style>
 </head>
@@ -94,6 +101,7 @@ kbd{background:var(--btn);border:1px solid var(--btn-border);border-radius:3px;p
 </div>
 <button id="tg" title="パネルを隠す (H)">●</button>
 <div id="p">
+  <div id="grab" aria-label="パネルの高さを変える"></div>
   <div id="fps">&nbsp;</div>
   <div class="g">
     <button id="bP">一時停止</button><button id="bS">再配置</button>
@@ -555,6 +563,32 @@ const togglePanel = () => {
   $('tg').title = h ? 'パネルを表示 (H)' : 'パネルを隠す (H)';
 };
 $('tg').onclick = togglePanel;
+
+// スマホのシート: 取っ手を上下にドラッグで高さ変更。下まで下げきると閉じる。高さはこの端末に記憶
+(() => {
+  const P = $('p'), G = $('grab');
+  const maxH = () => innerHeight - 56 - (parseFloat(getComputedStyle(P).getPropertyValue('--sat')) || 0);
+  const setH = h => P.style.setProperty('--sheet-h', h + 'px');
+  try { const h = +localStorage.getItem('sheetH'); if (h > 0) setH(Math.min(h, maxH())); } catch (_) {}
+  let d = null;
+  G.addEventListener('pointerdown', e => {
+    G.setPointerCapture(e.pointerId);
+    d = { y: e.clientY, h: P.getBoundingClientRect().height };
+  });
+  G.addEventListener('pointermove', e => {
+    if (!d) return;
+    d.cur = Math.max(40, Math.min(maxH(), d.h - (e.clientY - d.y)));
+    setH(d.cur);
+  });
+  const end = () => {
+    if (!d) return;
+    if (d.cur !== undefined && d.cur < 90) { setH(d.h < 90 ? 300 : d.h); togglePanel(); }   // 下げきったら閉じる（次は元の高さで開く）
+    else if (d.cur !== undefined) { try { localStorage.setItem('sheetH', Math.round(d.cur)); } catch (_) {} }
+    d = null;
+  };
+  G.addEventListener('pointerup', end);
+  G.addEventListener('pointercancel', end);
+})();
 $('bR').onclick = randRules;
 $('bS').onclick = spawn;
 $('bP').onclick = togglePause;
