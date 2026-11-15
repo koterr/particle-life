@@ -39,6 +39,9 @@ details[open]>summary::before{transform:rotate(90deg)}
 .r{margin:6px 0}.r div{display:flex;justify-content:space-between;align-items:center}
 .r div span:last-child{color:var(--muted);font-variant-numeric:tabular-nums}
 input[type=range]{width:100%;margin:2px 0;accent-color:var(--accent)}
+.r .sr{display:flex;align-items:center;gap:4px}
+.sr input{flex:1;min-width:0}
+#p .nb{flex:none;width:20px;height:20px;padding:0;border-radius:50%;line-height:18px;font-size:12px;color:var(--muted)}
 .g{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin:6px 0}
 .g>.full{grid-column:1/-1}
 button{background:var(--btn);color:var(--fg);border:1px solid var(--btn-border);border-radius:4px;padding:5px 4px;cursor:pointer;font:inherit;margin:0;touch-action:manipulation}
@@ -62,6 +65,7 @@ kbd{background:var(--btn);border:1px solid var(--btn-border);border-radius:3px;p
 
 /* タッチ端末（スマホ・iPad）: 指で押しやすいサイズに */
 @media (pointer:coarse){
+  #p .nb{width:28px;height:28px;line-height:26px;font-size:15px}
   html,body{font-size:14px}
   .touch{display:revert}.mouse{display:none}
   #tg{width:36px;height:36px;font-size:16px;line-height:34px}
@@ -540,18 +544,37 @@ const defs = [
   ['m', '色の数', 1, 12, 1, 'sim'],
   ['r', '作用半径', 20, 200, 1, 'sim'],
   ['t', '摩擦 (半減期)', 0.005, 0.3, 0.005, 'sim'],
-  ['f', '力の強さ', 0.1, 30, 0.1, 'sim'],
+  ['f', '力の強さ', 0.1, 15, 0.1, 'sim'],
   ['d', 'ゆらぎの変化量', 0, 1, 0.01, 'rule'],
 ];
+// スライダー + 微調整ボタン（− / ＋ で1目盛りずつ。押し続けると連続で変わる）
 for (const [k, label, min, max, st, grp] of defs) {
+  const dec = (String(st).split('.')[1] || '').length;   // 表示する小数桁数
   const d = document.createElement('div'); d.className = 'r';
-  d.innerHTML = `<div><span>${label}</span><span>${S[k]}</span></div><input type="range" min="${min}" max="${max}" step="${st}" value="${S[k]}">`;
+  d.innerHTML = `<div><span>${label}</span><span>${S[k].toFixed(dec)}</span></div>
+    <div class="sr"><button class="nb" aria-label="${label}を下げる">−</button><input type="range" min="${min}" max="${max}" step="${st}" value="${S[k]}"><button class="nb" aria-label="${label}を上げる">＋</button></div>`;
   const out = d.querySelector('div span:last-child'), inp = d.querySelector('input');
-  inp.addEventListener('input', () => {
-    S[k] = +inp.value; out.textContent = S[k];
+  const apply = () => {
+    S[k] = +inp.value; out.textContent = S[k].toFixed(dec);
     if (k === 'n') spawn();
     if (k === 'm') { setColors(S.m); randRules(); }
-  });
+  };
+  inp.addEventListener('input', apply);
+  const nudge = dir => {
+    const v = Math.max(min, Math.min(max, +(Math.round(+inp.value / st + dir) * st).toFixed(dec)));
+    if (v !== +inp.value) { inp.value = v; apply(); }
+  };
+  const [bm, bp] = d.querySelectorAll('.nb');
+  for (const [b, dir] of [[bm, -1], [bp, 1]]) {
+    let t1 = 0, t2 = 0;
+    const stop = () => { clearTimeout(t1); clearInterval(t2); };
+    b.addEventListener('pointerdown', e => {
+      e.preventDefault(); nudge(dir); stop();
+      t1 = setTimeout(() => { t2 = setInterval(() => nudge(dir), 70); }, 400);
+    });
+    for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) b.addEventListener(ev, stop);
+    b.addEventListener('keydown', e => { if (e.key === 'Enter') nudge(dir); });
+  }
   $('sl-' + grp).appendChild(d);
 }
 
