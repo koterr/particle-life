@@ -17,6 +17,7 @@
   --bg:#000; --panel:rgba(18,18,22,.9); --line:#2e2e36;
   --fg:#ddd; --fg-strong:#f0f0f4; --muted:#8a8a96; --dim:#777;
   --btn:#2a2a32; --btn-hover:#3a3a44; --btn-border:#444;
+  --pos:#5dff8a; --neg:#ff6b6b;
   --on:#3d3d7a; --on-border:#7a7aff; --accent:#8a8aff;
   --sat:env(safe-area-inset-top,0px); --sab:env(safe-area-inset-bottom,0px);
   --sal:env(safe-area-inset-left,0px); --sar:env(safe-area-inset-right,0px);
@@ -52,6 +53,7 @@ table{border-collapse:collapse;width:100%;color:var(--muted);font-size:11px;line
 td:first-child{white-space:nowrap;padding-right:6px}
 kbd{background:var(--btn);border:1px solid var(--btn-border);border-radius:3px;padding:0 4px;font:inherit;color:var(--fg)}
 .touch{display:none}
+#mxTip{position:fixed;z-index:4;transform:translate(-50%,calc(-100% - 44px));padding:6px 12px;border-radius:10px;background:var(--panel);border:1px solid var(--btn-border);font:600 22px system-ui,sans-serif;font-variant-numeric:tabular-nums;pointer-events:none}
 #a2hs{position:fixed;z-index:3;left:50%;top:50%;transform:translate(-50%,-50%);width:min(320px,calc(100% - 32px));box-sizing:border-box;padding:16px;border-radius:12px;background:var(--panel);border:1px solid var(--btn-border);line-height:1.6}
 #a2hs b{color:var(--fg-strong)}
 #a2hs ol{margin:8px 0 12px;padding-left:1.4em}
@@ -80,6 +82,7 @@ kbd{background:var(--btn);border:1px solid var(--btn-border);border-radius:3px;p
 </head>
 <body>
 <canvas id="c"></canvas>
+<div id="mxTip" hidden></div>
 <div id="a2hs" hidden>
   <b>iPhoneで全画面にするには</b>
   <ol>
@@ -107,7 +110,7 @@ kbd{background:var(--btn);border:1px solid var(--btn-border);border-radius:3px;p
     <div id="sl-rule"></div>
     <canvas id="mx"></canvas>
     <div id="mv">&nbsp;</div>
-    <div class="note"><span class="mouse">左クリック +0.2 / 右クリック −0.2 / ホイール ±0.05</span><span class="touch">タップ +0.2 / 長押し −0.2</span></div>
+    <div class="note"><span class="mouse">左クリック +0.2 / 右クリック −0.2 / ホイール ±0.05</span><span class="touch">押したまま左右にドラッグで値を変更（右 ＋ / 左 −）</span></div>
   </details>
 
   <details open>
@@ -125,8 +128,8 @@ kbd{background:var(--btn);border:1px solid var(--btn-border);border-radius:3px;p
     <table class="touch">
       <tr><td>1本指ドラッグ</td><td>表示移動</td></tr>
       <tr><td>2本指ピンチ</td><td>ズーム</td></tr>
-      <tr><td>行列タップ</td><td>値 +0.2（値も表示）</td></tr>
-      <tr><td>行列長押し</td><td>値 −0.2</td></tr>
+      <tr><td>行列 押したまま左右</td><td>値を変更（右 ＋ / 左 −）</td></tr>
+      <tr><td>行列 タップ</td><td>選択して値を表示</td></tr>
       <tr><td>● / ○</td><td>パネル 表示 / 非表示</td></tr>
     </table>
     <table class="mouse">
@@ -463,6 +466,7 @@ function drawMx() {
       mctx.fillRect((j + 1) * s + 1, (i + 1) * s + 1, s - 2, s - 2);
       mctx.fillStyle = 'rgba(255,255,255,.85)';
       mctx.fillText(fmt(v, dg), (j + 1.5) * s, (i + 1.5) * s + .5);
+      if (i * M + j === hov) { mctx.strokeStyle = '#fff'; mctx.lineWidth = 2; mctx.strokeRect((j + 1) * s + 1, (i + 1) * s + 1, s - 2, s - 2); }
     }
   }
   $('mv').textContent = hov >= 0 && hov < M * M
@@ -481,25 +485,44 @@ function mxEdit(e, dv) {
   K[k] = Math.max(-1, Math.min(1, Math.round((K[k] + dv) * 100) / 100));
   drawMx();
 }
-// マウス: 左 +0.2 / 右 −0.2。タッチ: タップ +0.2 / 長押し −0.2（押した時点で値を表示）
-let lp = null;
+// マウス: 左 +0.2 / 右 −0.2。
+// タッチ: マスを押したまま左右にドラッグ → 値が連続して変わる（右で＋、左で−。約150pxで1.0）
+//         指の上に値の吹き出しを表示。押して離すだけなら選択して値を見るだけ
+const SENS = 1 / 150;
+let tdrag = null;
+const tip = $('mxTip');
+function showTip(e) {
+  const v = K[tdrag.k];
+  tip.textContent = (v >= 0 ? '+' : '') + v.toFixed(2);
+  tip.style.color = v >= 0 ? 'var(--pos)' : 'var(--neg)';
+  tip.style.left = e.clientX + 'px';
+  tip.style.top = e.clientY + 'px';
+  tip.hidden = false;
+}
 mx.addEventListener('pointerdown', e => {
   if (e.pointerType === 'mouse') { mxEdit(e, e.button === 2 ? -0.2 : 0.2); return; }
   e.preventDefault();
   const c = mxCell(e);
   if (c < 0) return;
+  mx.setPointerCapture(e.pointerId);
   hov = c; drawMx();
-  const at = { clientX: e.clientX, clientY: e.clientY }, o = { done: false };
-  o.t = setTimeout(() => { o.done = true; mxEdit(at, -0.2); navigator.vibrate?.(15); }, 450);
-  lp = o;
+  tdrag = { id: e.pointerId, k: c, x0: e.clientX, v0: K[c], moved: false };
+  showTip(e);
 });
-mx.addEventListener('pointerup', e => {
-  if (!lp) return;
-  clearTimeout(lp.t);
-  if (!lp.done && mxCell(e) === hov) mxEdit(e, 0.2);
-  lp = null;
+mx.addEventListener('pointermove', e => {
+  if (!tdrag || e.pointerId !== tdrag.id) return;
+  const dx = e.clientX - tdrag.x0;
+  if (!tdrag.moved && Math.abs(dx) < 6) return;   // 少しの指ブレは無視
+  tdrag.moved = true;
+  const v = Math.max(-1, Math.min(1, Math.round((tdrag.v0 + dx * SENS) * 100) / 100));
+  // 端まで行ったら基準を付け直す（戻すとすぐ反応するように）
+  if (v === 1 || v === -1) { tdrag.v0 = v; tdrag.x0 = e.clientX; }
+  K[tdrag.k] = v;
+  drawMx(); showTip(e);
 });
-mx.addEventListener('pointercancel', () => { if (lp) clearTimeout(lp.t); lp = null; });
+const endT = e => { if (tdrag && e.pointerId === tdrag.id) { tdrag = null; tip.hidden = true; } };
+mx.addEventListener('pointerup', endT);
+mx.addEventListener('pointercancel', endT);
 mx.addEventListener('contextmenu', e => e.preventDefault());
 mx.addEventListener('wheel', e => { e.preventDefault(); mxEdit(e, e.deltaY < 0 ? 0.05 : -0.05); }, { passive: false });
 
