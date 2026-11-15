@@ -57,7 +57,11 @@ table{border-collapse:collapse;width:100%;color:var(--muted);font-size:11px;line
 td:first-child{white-space:nowrap;padding-right:6px}
 kbd{background:var(--btn);border:1px solid var(--btn-border);border-radius:3px;padding:0 4px;font:inherit;color:var(--fg)}
 .touch{display:none}
-#mxTip{position:fixed;z-index:4;transform:translate(-50%,calc(-100% - 44px));padding:6px 12px;border-radius:10px;background:var(--panel);border:1px solid var(--btn-border);font:600 22px system-ui,sans-serif;font-variant-numeric:tabular-nums;pointer-events:none}
+#mxTip{position:fixed;z-index:4;display:flex;align-items:center;gap:6px;white-space:nowrap;transform:translate(-50%,calc(-100% - 44px));padding:6px 12px;border-radius:10px;background:var(--panel);border:1px solid var(--btn-border);font:600 22px system-ui,sans-serif;font-variant-numeric:tabular-nums;pointer-events:none}
+#mxTip[hidden]{display:none}
+#mxTip i{display:block;width:18px;height:18px;border-radius:50%;box-shadow:0 0 0 1px rgba(255,255,255,.35)}
+#mxTip .ar{color:var(--muted);font-size:16px}
+#mxTip span:last-child{margin-left:4px}
 #a2hs{position:fixed;z-index:3;left:50%;top:50%;transform:translate(-50%,-50%);width:min(320px,calc(100% - 32px));box-sizing:border-box;padding:16px;border-radius:12px;background:var(--panel);border:1px solid var(--btn-border);line-height:1.6}
 #a2hs b{color:var(--fg-strong)}
 #a2hs ol{margin:8px 0 12px;padding-left:1.4em}
@@ -504,9 +508,10 @@ const SENS = 1 / 150;
 let tdrag = null;
 const tip = $('mxTip');
 function showTip(e) {
-  const v = K[tdrag.k];
-  tip.textContent = (v >= 0 ? '+' : '') + v.toFixed(2);
-  tip.style.color = v >= 0 ? 'var(--pos)' : 'var(--neg)';
+  // どの色（行）が どの色（列）に対する値か を色の丸で表示: ● → ●  +0.53
+  const v = K[tdrag.k], i = tdrag.k / M | 0, j = tdrag.k % M;
+  tip.innerHTML = `<i style="background:${css[i]}"></i><span class="ar">→</span><i style="background:${css[j]}"></i>`
+    + `<span style="color:var(${v >= 0 ? '--pos' : '--neg'})">${v >= 0 ? '+' : ''}${v.toFixed(2)}</span>`;
   tip.style.left = e.clientX + 'px';
   tip.style.top = e.clientY + 'px';
   tip.hidden = false;
